@@ -29,7 +29,6 @@ import pandas as _pd
 
 from . import Ticker, utils
 from .data import YfData
-from . import shared
 
 
 @utils.log_indent_decorator
@@ -114,26 +113,27 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
         tickers, (list, set, tuple)) else tickers.replace(',', ' ').split()
 
     # accept isin as ticker
-    shared._ISINS = {}
+    _ISINS = {}
     _tickers_ = []
     for ticker in tickers:
         if utils.is_isin(ticker):
             isin = ticker
             ticker = utils.get_ticker_by_isin(ticker, proxy, session=session)
-            shared._ISINS[ticker] = isin
+            _ISINS[ticker] = isin
         _tickers_.append(ticker)
 
     tickers = _tickers_
 
     tickers = list(set([ticker.upper() for ticker in tickers]))
 
+    _PROGRESS_BAR = None
     if progress:
-        shared._PROGRESS_BAR = utils.ProgressBar(len(tickers), 'completed')
+        _PROGRESS_BAR = utils.ProgressBar(len(tickers), 'completed')
 
     # reset dfs
     dfs = {}
-    shared._ERRORS = {}
-    shared._TRACEBACKS = {}
+    _ERRORS = {}
+    _TRACEBACKS = {}
 
     # Ensure data initialised with session.
     YfData(session=session)
@@ -154,36 +154,40 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
                 )
 
             for future in _futures.as_completed(futures):
-                ticker, data = future.result()
+                ticker, data, error, traceback = future.result()
                 dfs[ticker.upper()] = data
-                if progress:
-                    shared._PROGRESS_BAR.animate()
+                _ERRORS.update(error)
+                _TRACEBACKS.update(traceback)
+                if _PROGRESS_BAR is not None:
+                    _PROGRESS_BAR.animate()
     # download synchronously
     else:
         for i, ticker in enumerate(tickers):
-            ticker, data = _download_one(ticker, period=period, interval=interval,
+            ticker, data, error, traceback = _download_one(ticker, period=period, interval=interval,
                                  start=start, end=end, prepost=prepost,
                                  actions=actions, auto_adjust=auto_adjust,
                                  back_adjust=back_adjust, repair=repair, keepna=keepna,
                                  proxy=proxy,
                                  rounding=rounding, timeout=timeout)
             dfs[ticker.upper()] = data
+            _ERRORS.update(error)
+            _TRACEBACKS.update(traceback)
             if progress:
-                shared._PROGRESS_BAR.animate()
+                _PROGRESS_BAR.animate()
 
     if progress:
-        shared._PROGRESS_BAR.completed()
+        _PROGRESS_BAR.completed()
 
-    if shared._ERRORS:
+    if len(_ERRORS) > 0:
         # Send errors to logging module
         logger = utils.get_yf_logger()
         logger.error('\n%.f Failed download%s:' % (
-            len(shared._ERRORS), 's' if len(shared._ERRORS) > 1 else ''))
+            len(_ERRORS), 's' if len(_ERRORS) > 1 else ''))
 
         # Log each distinct error once, with list of symbols affected
         errors = {}
-        for ticker in shared._ERRORS:
-            err = shared._ERRORS[ticker]
+        for ticker in _ERRORS:
+            err = _ERRORS[ticker]
             err = err.replace(f'{ticker}', '%ticker%')
             if err not in errors:
                 errors[err] = [ticker]
@@ -194,8 +198,8 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
 
         # Log each distinct traceback once, with list of symbols affected
         tbs = {}
-        for ticker in shared._TRACEBACKS:
-            tb = shared._TRACEBACKS[ticker]
+        for ticker in _TRACEBACKS:
+            tb = _TRACEBACKS[ticker]
             tb = tb.replace(f'{ticker}', '%ticker%')
             if tb not in tbs:
                 tbs[tb] = [ticker]
@@ -218,7 +222,7 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
                           keys=dfs.keys(), names=['Ticker', 'Price'])
     data.index = _pd.to_datetime(data.index, utc=True)
     # switch names back to isins if applicable
-    data.rename(columns=shared._ISINS, inplace=True)
+    data.rename(columns=_ISINS, inplace=True)
 
     if group_by == 'column':
         data.columns = data.columns.swaplevel(0, 1)
@@ -257,12 +261,12 @@ def _download_one_threaded(ticker, start=None, end=None,
                            auto_adjust=False, back_adjust=False, repair=False,
                            actions=False, progress=True, period="max",
                            interval="1d", prepost=False, proxy=None,
-                           keepna=False, rounding=False, timeout=10):
+                           keepna=False, rounding=False, timeout=10, _PROGRESS_BAR=None):
     data = _download_one(ticker, start, end, auto_adjust, back_adjust, repair,
                          actions, period, interval, prepost, proxy, rounding,
                          keepna, timeout)
-    if progress:
-        shared._PROGRESS_BAR.animate()
+    if _PROGRESS_BAR is not None:
+        _PROGRESS_BAR.animate()
     return data
 
 
@@ -271,6 +275,8 @@ def _download_one(ticker, start=None, end=None,
                   actions=False, period="max", interval="1d",
                   prepost=False, proxy=None, rounding=False,
                   keepna=False, timeout=10):
+    _ERRORS = {}
+    _TRACEBACKS = {}
     data = utils.empty_df()
     try:
         data = Ticker(ticker).history(
@@ -283,7 +289,7 @@ def _download_one(ticker, start=None, end=None,
         )
     except Exception as e:
         # glob try/except needed as current thead implementation breaks if exception is raised.
-        shared._ERRORS[ticker.upper()] = repr(e)
-        shared._TRACEBACKS[ticker.upper()] = traceback.format_exc()
+        _ERRORS[ticker.upper()] = repr(e)
+        _TRACEBACKS[ticker.upper()] = traceback.format_exc()
 
-    return ticker, data
+    return ticker, data, _ERRORS, _TRACEBACKS

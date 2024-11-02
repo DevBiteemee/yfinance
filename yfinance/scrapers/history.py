@@ -7,7 +7,7 @@ from math import isclose
 import time as _time
 import bisect
 
-from yfinance import shared, utils
+from yfinance import utils
 from yfinance.const import _BASE_URL_, _PRICE_COLNAMES_
 from yfinance.exceptions import YFInvalidPeriodError, YFPricesMissingError, YFTzMissingError
 
@@ -89,8 +89,6 @@ class PriceHistory:
                     # Every valid ticker has a timezone. A missing timezone is a problem.
                     _exception = YFTzMissingError(self.ticker)
                     err_msg = str(_exception)
-                    shared._DFS[self.ticker] = utils.empty_df()
-                    shared._ERRORS[self.ticker] = err_msg.split(': ', 1)[1]
                     if raise_errors:
                         raise _exception
                     else:
@@ -115,8 +113,6 @@ class PriceHistory:
                 # Every valid ticker has a timezone. A missing timezone is a problem.
                 _exception = YFTzMissingError(self.ticker)
                 err_msg = str(_exception)
-                shared._DFS[self.ticker] = utils.empty_df()
-                shared._ERRORS[self.ticker] = err_msg.split(': ', 1)[1]
                 if raise_errors:
                     raise _exception
                 else:
@@ -237,8 +233,6 @@ class PriceHistory:
 
         if fail:
             err_msg = str(_exception)
-            shared._DFS[self.ticker] = utils.empty_df()
-            shared._ERRORS[self.ticker] = err_msg.split(': ', 1)[1]
             if raise_errors:
                 raise _exception
             else:
@@ -414,8 +408,6 @@ class PriceHistory:
                 err_msg = "auto_adjust failed with %s" % e
             else:
                 err_msg = "back_adjust failed with %s" % e
-            shared._DFS[self.ticker] = utils.empty_df()
-            shared._ERRORS[self.ticker] = err_msg
             if raise_errors:
                 raise Exception('%s: %s' % (self.ticker, err_msg))
             else:
