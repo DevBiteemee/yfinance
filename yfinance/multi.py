@@ -155,7 +155,6 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
 
             for future in _futures.as_completed(futures):
                 ticker, data = future.result()
-                print(f'Ticker {ticker}, data {data}')
                 dfs[ticker.upper()] = data
                 if progress:
                     shared._PROGRESS_BAR.animate()
