@@ -22,10 +22,9 @@
 from __future__ import print_function
 
 import logging
-import time as _time
 import traceback
 
-import multitasking as _multitasking
+import concurrent.futures as _futures
 import pandas as _pd
 
 from . import Ticker, utils
@@ -131,8 +130,8 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
     if progress:
         shared._PROGRESS_BAR = utils.ProgressBar(len(tickers), 'completed')
 
-    # reset shared._DFS
-    shared._DFS = {}
+    # reset dfs
+    dfs = {}
     shared._ERRORS = {}
     shared._TRACEBACKS = {}
 
@@ -141,18 +140,24 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
 
     # download using threads
     if threads:
-        if threads is True:
-            threads = min([len(tickers), _multitasking.cpu_count() * 2])
-        _multitasking.set_max_threads(threads)
-        for i, ticker in enumerate(tickers):
-            _download_one_threaded(ticker, period=period, interval=interval,
-                                   start=start, end=end, prepost=prepost,
-                                   actions=actions, auto_adjust=auto_adjust,
-                                   back_adjust=back_adjust, repair=repair, keepna=keepna,
-                                   progress=(progress and i > 0), proxy=proxy,
-                                   rounding=rounding, timeout=timeout)
-        while len(shared._DFS) < len(tickers):
-            _time.sleep(0.01)
+        with _futures.ThreadPoolExecutor() as executor:
+            futures = []
+            for i, ticker in enumerate(tickers):
+                futures.append(
+                    executor.submit(_download_one_threaded, ticker=ticker, period=period,
+                                    interval=interval, start=start, end=end, prepost=prepost,
+                                    actions=actions, auto_adjust=auto_adjust,
+                                    back_adjust=back_adjust,
+                                    progress=(progress and i > 0), proxy=proxy,
+                                    rounding=rounding
+                    )
+                )
+
+            for future in _futures.as_completed(futures):
+                ticker, data = future.result()
+                dfs[ticker.upper()] = data
+                if progress:
+                    shared._PROGRESS_BAR.animate()
     # download synchronously
     else:
         for i, ticker in enumerate(tickers):
@@ -199,17 +204,17 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
             logger.debug(f'{tbs[tb]}: ' + tb)
 
     if ignore_tz:
-        for tkr in shared._DFS.keys():
-            if (shared._DFS[tkr] is not None) and (shared._DFS[tkr].shape[0] > 0):
-                shared._DFS[tkr].index = shared._DFS[tkr].index.tz_localize(None)
+        for tkr in dfs.keys():
+            if (dfs[tkr] is not None) and (dfs[tkr].shape[0] > 0):
+                dfs[tkr].index = dfs[tkr].index.tz_localize(None)
 
     try:
-        data = _pd.concat(shared._DFS.values(), axis=1, sort=True,
-                          keys=shared._DFS.keys(), names=['Ticker', 'Price'])
+        data = _pd.concat(dfs.values(), axis=1, sort=True,
+                          keys=dfs.keys(), names=['Ticker', 'Price'])
     except Exception:
-        _realign_dfs()
-        data = _pd.concat(shared._DFS.values(), axis=1, sort=True,
-                          keys=shared._DFS.keys(), names=['Ticker', 'Price'])
+        _realign_dfs(dfs)
+        data = _pd.concat(dfs.values(), axis=1, sort=True,
+                          keys=dfs.keys(), names=['Ticker', 'Price'])
     data.index = _pd.to_datetime(data.index, utc=True)
     # switch names back to isins if applicable
     data.rename(columns=shared._ISINS, inplace=True)
@@ -224,40 +229,40 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
     return data
 
 
-def _realign_dfs():
+def _realign_dfs(dfs):
     idx_len = 0
     idx = None
 
-    for df in shared._DFS.values():
+    for df in dfs.values():
         if len(df) > idx_len:
             idx_len = len(df)
             idx = df.index
 
-    for key in shared._DFS.keys():
+    for key in dfs.keys():
         try:
-            shared._DFS[key] = _pd.DataFrame(
-                index=idx, data=shared._DFS[key]).drop_duplicates()
+            dfs[key] = _pd.DataFrame(
+                index=idx, data=dfs[key]).drop_duplicates()
         except Exception:
-            shared._DFS[key] = _pd.concat([
-                utils.empty_df(idx), shared._DFS[key].dropna()
+            dfs[key] = _pd.concat([
+                utils.empty_df(idx), dfs[key].dropna()
             ], axis=0, sort=True)
 
         # remove duplicate index
-        shared._DFS[key] = shared._DFS[key].loc[
-            ~shared._DFS[key].index.duplicated(keep='last')]
+        dfs[key] = dfs[key].loc[
+            ~dfs[key].index.duplicated(keep='last')]
 
 
-@_multitasking.task
 def _download_one_threaded(ticker, start=None, end=None,
                            auto_adjust=False, back_adjust=False, repair=False,
                            actions=False, progress=True, period="max",
                            interval="1d", prepost=False, proxy=None,
                            keepna=False, rounding=False, timeout=10):
-    _download_one(ticker, start, end, auto_adjust, back_adjust, repair,
+    data = _download_one(ticker, start, end, auto_adjust, back_adjust, repair,
                          actions, period, interval, prepost, proxy, rounding,
                          keepna, timeout)
     if progress:
         shared._PROGRESS_BAR.animate()
+    return data
 
 
 def _download_one(ticker, start=None, end=None,
@@ -277,10 +282,7 @@ def _download_one(ticker, start=None, end=None,
         )
     except Exception as e:
         # glob try/except needed as current thead implementation breaks if exception is raised.
-        shared._DFS[ticker.upper()] = utils.empty_df()
         shared._ERRORS[ticker.upper()] = repr(e)
         shared._TRACEBACKS[ticker.upper()] = traceback.format_exc()
-    else:
-        shared._DFS[ticker.upper()] = data
 
-    return data
+    return ticker, data
