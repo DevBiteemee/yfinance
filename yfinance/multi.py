@@ -234,7 +234,7 @@ def _realign_dfs(dfs):
     idx = None
 
     for df in dfs.values():
-        if len(df) > idx_len:
+        if len(dfs) > idx_len:
             idx_len = len(df)
             idx = df.index
 
