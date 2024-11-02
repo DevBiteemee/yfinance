@@ -234,7 +234,7 @@ def _realign_dfs(dfs):
     idx = None
 
     for df in dfs.values():
-        if len(dfs) > idx_len:
+        if len(df) > idx_len:
             idx_len = len(df)
             idx = df.index
 
@@ -282,6 +282,7 @@ def _download_one(ticker, start=None, end=None,
         )
     except Exception as e:
         # glob try/except needed as current thead implementation breaks if exception is raised.
+        data = utils.empty_df()
         shared._ERRORS[ticker.upper()] = repr(e)
         shared._TRACEBACKS[ticker.upper()] = traceback.format_exc()
 
