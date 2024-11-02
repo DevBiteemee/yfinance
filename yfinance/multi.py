@@ -155,18 +155,20 @@ def download(tickers, start=None, end=None, actions=False, threads=True,
 
             for future in _futures.as_completed(futures):
                 ticker, data = future.result()
+                print(f'Ticker {ticker}, data {data}')
                 dfs[ticker.upper()] = data
                 if progress:
                     shared._PROGRESS_BAR.animate()
     # download synchronously
     else:
         for i, ticker in enumerate(tickers):
-            data = _download_one(ticker, period=period, interval=interval,
+            ticker, data = _download_one(ticker, period=period, interval=interval,
                                  start=start, end=end, prepost=prepost,
                                  actions=actions, auto_adjust=auto_adjust,
                                  back_adjust=back_adjust, repair=repair, keepna=keepna,
                                  proxy=proxy,
                                  rounding=rounding, timeout=timeout)
+            dfs[ticker.upper()] = data
             if progress:
                 shared._PROGRESS_BAR.animate()
 
@@ -270,7 +272,7 @@ def _download_one(ticker, start=None, end=None,
                   actions=False, period="max", interval="1d",
                   prepost=False, proxy=None, rounding=False,
                   keepna=False, timeout=10):
-    data = None
+    data = utils.empty_df()
     try:
         data = Ticker(ticker).history(
                 period=period, interval=interval,
@@ -282,7 +284,6 @@ def _download_one(ticker, start=None, end=None,
         )
     except Exception as e:
         # glob try/except needed as current thead implementation breaks if exception is raised.
-        data = utils.empty_df()
         shared._ERRORS[ticker.upper()] = repr(e)
         shared._TRACEBACKS[ticker.upper()] = traceback.format_exc()
 
